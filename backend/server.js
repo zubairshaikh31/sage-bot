@@ -92,7 +92,7 @@ app.post("/api/chat", async (req, res) => {
 
   try {
     const completion = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",,
+      model: "llama-3.1-8b-instant",
       max_tokens: 800,
       stream: false,
       messages: [{ role: "system", content: SYSTEM_PROMPT }, ...session.messages],
