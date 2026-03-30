@@ -8,13 +8,11 @@ const { v4: uuidv4 } = require("uuid");
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// ─── Groq client ──────────────────────────────────────────────────────────────
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY || "missing-key",
   baseURL: "https://api.groq.com/openai/v1",
 });
 
-// ─── Sessions ─────────────────────────────────────────────────────────────────
 const sessions = new Map();
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 
@@ -31,26 +29,12 @@ function createSession() {
   return sessions.get(id);
 }
 
-// ─── CORS — allow ALL origins (tighten via ALLOWED_ORIGINS env var) ───────────
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-    const allowed = process.env.ALLOWED_ORIGINS
-      ? process.env.ALLOWED_ORIGINS.split(",").map(o => o.trim())
-      : null;
-    if (!allowed || allowed.includes(origin)) return cb(null, true);
-    cb(new Error("CORS: origin not allowed"));
-  },
-  methods: ["GET", "POST", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type"],
-  credentials: false,
-}));
-app.options("*", cors()); // preflight
-
+// CORS — allow everything (no ALLOWED_ORIGINS restriction)
+app.use(cors({ origin: "*", methods: ["GET", "POST", "DELETE", "OPTIONS"], allowedHeaders: ["Content-Type"] }));
+app.options("*", cors());
 app.use(express.json({ limit: "10kb" }));
-app.use("/api/", rateLimit({ windowMs: 60000, max: 30, message: { error: "Too many requests." } }));
+app.use("/api/", rateLimit({ windowMs: 60000, max: 60, message: { error: "Too many requests." } }));
 
-// ─── System prompt ────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `You are Sage, a warm, motivational and uplifting self-reflection companion. Your role is to support humans in four key areas:
 
 1. EMOTIONAL SUPPORT & VENTING — Listen first, validate always. Reflect feelings back without judgment.
@@ -62,18 +46,22 @@ TONE: Warm, motivational, uplifting. Never clinical or preachy.
 STYLE: Short paragraphs (2-4 max). ONE question per response. Natural human language.
 SAFETY: If self-harm is mentioned, direct to 988 Suicide & Crisis Lifeline and stay present.`;
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
-app.get("/api/health", (req, res) => res.json({ status: "ok", sessions: sessions.size }));
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", sessions: sessions.size, groqKeySet: !!process.env.GROQ_API_KEY });
+});
 
 app.post("/api/session", (req, res) => {
   try {
-    const { sessionId } = req.body;
+    const { sessionId } = req.body || {};
     if (sessionId) {
       const s = getSession(sessionId);
       if (s) return res.json({ sessionId: s.id, resumed: true });
     }
     res.json({ sessionId: createSession().id, resumed: false });
-  } catch (e) { res.status(500).json({ error: "Failed to create session." }); }
+  } catch (e) {
+    console.error("Session error:", e.message);
+    res.status(500).json({ error: "Failed to create session." });
+  }
 });
 
 app.get("/api/session/:id", (req, res) => {
@@ -82,84 +70,58 @@ app.get("/api/session/:id", (req, res) => {
   res.json({ messages: s.messages, moodLog: s.moodLog, goals: s.goals, createdAt: s.createdAt });
 });
 
-// ── Chat — SSE with anti-buffering headers ────────────────────────────────────
+// ── Simple non-streaming chat endpoint ────────────────────────────────────────
+// No SSE, no buffering issues, no keep-alive complexity.
+// Returns plain JSON: { reply: "..." }
 app.post("/api/chat", async (req, res) => {
-  const { sessionId, message, mood } = req.body;
-  if (!sessionId || !message?.trim())
-    return res.status(400).json({ error: "sessionId and message are required." });
+  const { sessionId, message, mood } = req.body || {};
 
-  const session = getSession(sessionId);
-  if (!session)
-    return res.status(404).json({ error: "Session expired. Please refresh." });
+  if (!sessionId || !message?.trim()) {
+    return res.status(400).json({ error: "sessionId and message are required." });
+  }
+
+  let session = getSession(sessionId);
+  if (!session) {
+    // Auto-create a new session instead of rejecting
+    session = createSession();
+    console.log("Session expired, created new:", session.id);
+  }
 
   if (mood) session.moodLog.push({ mood, timestamp: new Date().toISOString() });
   session.messages.push({ role: "user", content: message.trim() });
 
-  // Critical headers to defeat Render/Nginx response buffering
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");   // tells Nginx: do NOT buffer
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.flushHeaders();
-
-  // Immediate ping so browser sees the connection open right away
-  res.write(": ping\n\n");
-  if (res.flush) res.flush();
-
-  // Keep-alive every 15s to prevent Render's 30s idle timeout
-  const keepAlive = setInterval(() => {
-    try { res.write(": keep-alive\n\n"); if (res.flush) res.flush(); } catch (_) {}
-  }, 15000);
-
-  let fullReply = "";
   try {
-    const stream = await groq.chat.completions.create({
+    const completion = await groq.chat.completions.create({
       model: "llama3-8b-8192",
       max_tokens: 800,
-      stream: true,
+      stream: false,
       messages: [{ role: "system", content: SYSTEM_PROMPT }, ...session.messages],
     });
 
-    for await (const chunk of stream) {
-      const text = chunk.choices?.[0]?.delta?.content;
-      if (text) {
-        fullReply += text;
-        res.write(`data: ${JSON.stringify({ type: "delta", text })}\n\n`);
-        if (res.flush) res.flush();
-      }
+    const reply = completion.choices?.[0]?.message?.content || "";
+    session.messages.push({ role: "assistant", content: reply });
+
+    res.json({ reply, sessionId: session.id });
+  } catch (err) {
+    console.error("Groq error:", err.status, err.message);
+    session.messages.pop(); // remove failed user message
+
+    let errorMsg = "Something went wrong. Please try again.";
+    if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY === "missing-key") {
+      errorMsg = "GROQ_API_KEY is not configured on the server.";
+    } else if (err.status === 401) {
+      errorMsg = "Invalid GROQ_API_KEY on server.";
+    } else if (err.status === 429) {
+      errorMsg = "Rate limit hit — please wait a moment and try again.";
     }
 
-    session.messages.push({ role: "assistant", content: fullReply });
-    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-    if (res.flush) res.flush();
-    res.end();
-  } catch (err) {
-    console.error("Groq error:", err.status, err.message, err.error);
-    session.messages.pop();
-    // Surface a clearer message for common errors
-    let clientMsg = "Something went wrong. Please try again.";
-    if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY === "missing-key") {
-      clientMsg = "Server configuration error: GROQ_API_KEY is not set on the server.";
-    } else if (err.status === 401) {
-      clientMsg = "Server configuration error: Invalid GROQ_API_KEY.";
-    } else if (err.status === 429) {
-      clientMsg = "Too many requests — please wait a moment and try again.";
-    }
-    // Only write if response hasn't ended
-    if (!res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ type: "error", message: clientMsg })}\n\n`);
-      if (res.flush) res.flush();
-      res.end();
-    }
-  } finally {
-    clearInterval(keepAlive);
+    res.status(500).json({ error: errorMsg });
   }
 });
 
 app.post("/api/goals", (req, res) => {
   try {
-    const { sessionId, goal } = req.body;
+    const { sessionId, goal } = req.body || {};
     if (!sessionId || !goal?.trim()) return res.status(400).json({ error: "sessionId and goal required." });
     const s = getSession(sessionId);
     if (!s) return res.status(404).json({ error: "Session not found." });
@@ -171,7 +133,7 @@ app.post("/api/goals", (req, res) => {
 
 app.post("/api/goals/:goalId/toggle", (req, res) => {
   try {
-    const s = getSession(req.body.sessionId);
+    const s = getSession(req.body?.sessionId);
     if (!s) return res.status(404).json({ error: "Session not found." });
     const goal = s.goals.find(g => g.id === req.params.goalId);
     if (!goal) return res.status(404).json({ error: "Goal not found." });
