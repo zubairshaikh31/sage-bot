@@ -1,11 +1,5 @@
 // ── Config ────────────────────────────────────────────────────────────────────
-// In Vercel: set environment variable  VITE_API_URL = https://sage-bot-vihu.onrender.com/api
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
-
-// DEV GUARD — warn in console if env var is missing in production
-if (typeof window !== "undefined" && !import.meta.env.VITE_API_URL) {
-  console.warn("[Sage] VITE_API_URL is not set. API calls will go to /api on this domain. Set VITE_API_URL in Vercel env vars.");
-}
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let sessionId = null;
@@ -14,15 +8,14 @@ let isStreaming = false;
 let goals = [];
 let moodLog = [];
 
-// ── Wake up Render backend ────────────────────────────────────────────────────
+// ── Wake up Render (free tier sleeps after inactivity) ────────────────────────
 function pingBackend() {
   fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(10000) }).catch(() => {});
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  pingBackend(); // warm up Render free tier
-
+  pingBackend();
   try {
     const stored = localStorage.getItem("sage_session");
     const res = await fetch(`${API_BASE}/session`, {
@@ -39,7 +32,7 @@ async function init() {
     renderJournalPrompts();
   } catch (err) {
     console.error("Init error:", err);
-    appendBotMsg("I'm having trouble connecting. The server may be waking up — please **refresh the page** in a moment.");
+    appendBotMsg("Having trouble connecting — the server may be waking up. Please **refresh the page** in a moment.");
   }
 }
 
@@ -90,13 +83,16 @@ window.injectPrompt = function (text) {
   autoResize(input);
 };
 
-// ── Send message ──────────────────────────────────────────────────────────────
+// ── Send message (simple fetch, no SSE) ───────────────────────────────────────
 window.sendMessage = async function () {
   if (isStreaming) return;
+
+  // If session not ready yet, wait
   if (!sessionId) {
-    appendBotMsg("Still connecting to the server... please try again in a moment.");
+    appendBotMsg("Still connecting — please try again in a moment.");
     return;
   }
+
   const input = document.getElementById("msg-input");
   const text = input.value.trim();
   if (!text) return;
@@ -114,25 +110,7 @@ window.sendMessage = async function () {
 
   isStreaming = true;
   document.getElementById("send-btn").disabled = true;
-
   const typingEl = showTyping();
-  let typingRemoved = false;
-  const removeTyping = () => {
-    if (!typingRemoved && typingEl.parentNode) { typingEl.remove(); typingRemoved = true; }
-  };
-
-  // Single flag — once a message (reply or error) is shown, never show another
-  let msgShown = false;
-  let replyEl = null;
-
-  const showError = (msg) => {
-    if (msgShown) return;
-    msgShown = true;
-    removeTyping();
-    if (replyEl) { replyEl.innerHTML = renderMarkdown(msg); }
-    else { appendBotMsg(msg); }
-    scrollToBottom();
-  };
 
   try {
     const response = await fetch(`${API_BASE}/chat`, {
@@ -141,67 +119,32 @@ window.sendMessage = async function () {
       body: JSON.stringify({ sessionId, message: text, mood: moodToSend }),
     });
 
+    const data = await response.json();
+
+    typingEl.remove();
+
     if (!response.ok) {
-      // 404 = session expired (Render restarted and wiped memory) → auto-recreate
-      if (response.status === 404) {
-        localStorage.removeItem("sage_session");
-        sessionId = null;
-        try {
-          const r2 = await fetch(`${API_BASE}/session`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({}) });
-          const d2 = await r2.json();
-          sessionId = d2.sessionId;
-          localStorage.setItem("sage_session", sessionId);
-          document.getElementById("session-display").textContent = `ID: ${sessionId.slice(0,8)}…`;
-          showError("Session restarted — please send your message again.");
-        } catch { showError("Could not reconnect. Please refresh the page."); }
-      } else {
-        let errMsg = `Server error ${response.status}`;
-        try { const j = await response.json(); errMsg = j.error || errMsg; } catch {}
-        showError(errMsg);
-      }
+      // If session expired on server, update our sessionId
+      if (data.sessionId) sessionId = data.sessionId;
+      appendBotMsg(data.error || "Something went wrong — please try again.");
     } else {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop();
-
-        for (const part of parts) {
-          if (part.startsWith(":")) continue;
-          if (!part.startsWith("data: ")) continue;
-          let payload;
-          try { payload = JSON.parse(part.slice(6)); } catch { continue; }
-
-          if (payload.type === "delta" && payload.text) {
-            removeTyping();
-            if (!replyEl) { replyEl = createStreamingBubble(); msgShown = true; }
-            replyEl.dataset.raw = (replyEl.dataset.raw || "") + payload.text;
-            replyEl.innerHTML = renderMarkdown(replyEl.dataset.raw);
-            scrollToBottom();
-          }
-          if (payload.type === "error") {
-            showError(payload.message || "Something went wrong. Please try again.");
-          }
-        }
+      // Success — update sessionId if server returned a new one (after auto-recreate)
+      if (data.sessionId && data.sessionId !== sessionId) {
+        sessionId = data.sessionId;
+        localStorage.setItem("sage_session", sessionId);
       }
-
-      if (!msgShown) showError("I didn\'t catch that — could you try again?");
+      appendBotMsg(data.reply);
     }
 
   } catch (err) {
     console.error("Chat error:", err.message);
-    showError("Something went wrong on my end — please try again.");
+    typingEl.remove();
+    appendBotMsg("Something went wrong on my end — please try again.");
   }
 
   isStreaming = false;
   document.getElementById("send-btn").disabled = false;
 };
-
 
 // ── Message rendering ─────────────────────────────────────────────────────────
 function appendUserMsg(text) {
@@ -218,15 +161,6 @@ function appendBotMsg(text) {
   div.innerHTML = `<div class="msg-avatar">🌿</div><div class="msg-content"><div class="msg-bubble">${renderMarkdown(text)}</div><div class="msg-time">${getTime()}</div></div>`;
   document.getElementById("messages").appendChild(div);
   scrollToBottom();
-}
-
-function createStreamingBubble() {
-  const div = document.createElement("div");
-  div.className = "msg bot";
-  div.innerHTML = `<div class="msg-avatar">🌿</div><div class="msg-content"><div class="msg-bubble streaming-bubble"></div><div class="msg-time">${getTime()}</div></div>`;
-  document.getElementById("messages").appendChild(div);
-  scrollToBottom();
-  return div.querySelector(".streaming-bubble");
 }
 
 function showTyping() {
@@ -342,8 +276,8 @@ function renderMarkdown(text) {
 function escapeHtml(t) { return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 function getTime() { return new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
 function scrollToBottom() { const a = document.getElementById("messages"); a.scrollTop = a.scrollHeight; }
-window.autoResize = function (el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight,130)+"px"; };
-window.handleKey = function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
+window.autoResize = function (el) { el.style.height="auto"; el.style.height=Math.min(el.scrollHeight,130)+"px"; };
+window.handleKey = function (e) { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
 window.toggleGoal = toggleGoal;
 window.deleteGoal = deleteGoal;
 
