@@ -135,11 +135,23 @@ app.post("/api/chat", async (req, res) => {
     if (res.flush) res.flush();
     res.end();
   } catch (err) {
-    console.error("Groq error:", err.message);
+    console.error("Groq error:", err.status, err.message, err.error);
     session.messages.pop();
-    res.write(`data: ${JSON.stringify({ type: "error", message: "Something went wrong. Please try again." })}\n\n`);
-    if (res.flush) res.flush();
-    res.end();
+    // Surface a clearer message for common errors
+    let clientMsg = "Something went wrong. Please try again.";
+    if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY === "missing-key") {
+      clientMsg = "Server configuration error: GROQ_API_KEY is not set on the server.";
+    } else if (err.status === 401) {
+      clientMsg = "Server configuration error: Invalid GROQ_API_KEY.";
+    } else if (err.status === 429) {
+      clientMsg = "Too many requests — please wait a moment and try again.";
+    }
+    // Only write if response hasn't ended
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: "error", message: clientMsg })}\n\n`);
+      if (res.flush) res.flush();
+      res.end();
+    }
   } finally {
     clearInterval(keepAlive);
   }
