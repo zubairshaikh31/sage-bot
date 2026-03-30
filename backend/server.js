@@ -65,7 +65,7 @@ app.post("/api/session", (req, res) => {
 });
 
 app.get("/api/session/:id", (req, res) => {
-  const s = getSession(req.params.id);
+   s = getSession(req.params.id);
   if (!s) return res.status(404).json({ error: "Session not found or expired." });
   res.json({ messages: s.messages, moodLog: s.moodLog, goals: s.goals, createdAt: s.createdAt });
 });
@@ -92,7 +92,7 @@ app.post("/api/chat", async (req, res) => {
 
   try {
     const completion = await groq.chat.completions.create({
-      model: "llama3-8b-8192",
+      model: "llama-3.1-8b-instant",,
       max_tokens: 800,
       stream: false,
       messages: [{ role: "system", content: SYSTEM_PROMPT }, ...session.messages],
