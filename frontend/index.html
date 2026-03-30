@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sage — Your Reflection Companion</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;1,400&family=Nunito:wght@300;400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+
+      <!-- ── Sidebar ── -->
+      <aside id="sidebar">
+        <div class="sidebar-top">
+          <div class="logo">
+            <span class="logo-icon">🌿</span>
+            <div>
+              <div class="logo-name">Sage</div>
+              <div class="logo-sub">reflection companion</div>
+            </div>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav">
+          <button class="nav-btn active" data-tab="chat" onclick="showTab('chat')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Chat
+          </button>
+          <button class="nav-btn" data-tab="journal" onclick="showTab('journal')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            Journal
+          </button>
+          <button class="nav-btn" data-tab="goals" onclick="showTab('goals')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+            Goals
+          </button>
+          <button class="nav-btn" data-tab="mood" onclick="showTab('mood')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+            Mood Log
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <button class="clear-btn" onclick="clearHistory()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+            Clear chat
+          </button>
+          <div class="session-id" id="session-display"></div>
+        </div>
+      </aside>
+
+      <!-- ── Mobile header ── -->
+      <header class="mobile-header">
+        <div class="logo">
+          <span class="logo-icon">🌿</span>
+          <div class="logo-name">Sage</div>
+        </div>
+        <div class="mobile-tabs">
+          <button class="mob-tab active" data-tab="chat" onclick="showTab('chat')">Chat</button>
+          <button class="mob-tab" data-tab="journal" onclick="showTab('journal')">Journal</button>
+          <button class="mob-tab" data-tab="goals" onclick="showTab('goals')">Goals</button>
+          <button class="mob-tab" data-tab="mood" onclick="showTab('mood')">Mood</button>
+        </div>
+      </header>
+
+      <!-- ── Main content ── -->
+      <main id="main">
+
+        <!-- CHAT TAB -->
+        <section id="tab-chat" class="tab active">
+          <div class="chat-header">
+            <div class="mood-row">
+              <span class="mood-label">How are you feeling?</span>
+              <div class="mood-chips" id="mood-chips">
+                <button class="mood-chip" data-mood="Happy" onclick="selectMood(this)">😊 Happy</button>
+                <button class="mood-chip" data-mood="Anxious" onclick="selectMood(this)">😰 Anxious</button>
+                <button class="mood-chip" data-mood="Tired" onclick="selectMood(this)">😴 Tired</button>
+                <button class="mood-chip" data-mood="Motivated" onclick="selectMood(this)">🔥 Motivated</button>
+                <button class="mood-chip" data-mood="Sad" onclick="selectMood(this)">😔 Sad</button>
+                <button class="mood-chip" data-mood="Grateful" onclick="selectMood(this)">🙏 Grateful</button>
+                <button class="mood-chip" data-mood="Overwhelmed" onclick="selectMood(this)">😵 Overwhelmed</button>
+                <button class="mood-chip" data-mood="Calm" onclick="selectMood(this)">🌊 Calm</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="messages" id="messages"></div>
+
+          <div class="prompts-row" id="prompts-row">
+            <button class="prompt-chip" onclick="injectPrompt('How am I really feeling right now?')">How am I really feeling?</button>
+            <button class="prompt-chip" onclick="injectPrompt('I need help setting a meaningful goal.')">Help me set a goal</button>
+            <button class="prompt-chip" onclick="injectPrompt('I just need to vent about something.')">I need to vent</button>
+            <button class="prompt-chip" onclick="injectPrompt('Can you guide me through a breathing exercise?')">Breathing exercise</button>
+            <button class="prompt-chip" onclick="injectPrompt('What am I grateful for today?')">Gratitude reflection</button>
+            <button class="prompt-chip" onclick="injectPrompt('I feel stuck. Can you help me get unstuck?')">I feel stuck</button>
+          </div>
+
+          <div class="input-area">
+            <textarea id="msg-input" placeholder="Share what's on your mind…" rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+            <button id="send-btn" onclick="sendMessage()" aria-label="Send">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </div>
+        </section>
+
+        <!-- JOURNAL TAB -->
+        <section id="tab-journal" class="tab">
+          <div class="tab-header">
+            <h2>Reflection Journal</h2>
+            <p>Prompts to guide your self-discovery. Take your time.</p>
+          </div>
+          <div class="journal-grid" id="journal-grid">
+            <!-- Populated by JS -->
+          </div>
+        </section>
+
+        <!-- GOALS TAB -->
+        <section id="tab-goals" class="tab">
+          <div class="tab-header">
+            <h2>Your Goals</h2>
+            <p>What are you working towards? Small steps, big change.</p>
+          </div>
+          <div class="goal-input-row">
+            <input type="text" id="goal-input" placeholder="Add a new goal…" onkeydown="if(event.key==='Enter') addGoal()" />
+            <button class="add-btn" onclick="addGoal()">Add</button>
+          </div>
+          <ul class="goal-list" id="goal-list"></ul>
+          <div class="empty-state" id="goals-empty">
+            <span>🎯</span>
+            <p>No goals yet. Add your first one above!</p>
+          </div>
+        </section>
+
+        <!-- MOOD LOG TAB -->
+        <section id="tab-mood" class="tab">
+          <div class="tab-header">
+            <h2>Mood Log</h2>
+            <p>Your emotional journey, captured over time.</p>
+          </div>
+          <div class="mood-log" id="mood-log-list"></div>
+          <div class="empty-state" id="mood-empty">
+            <span>🌈</span>
+            <p>No moods logged yet. Tap a mood in the Chat to start.</p>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>
