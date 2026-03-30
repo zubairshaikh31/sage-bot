@@ -12,5 +12,13 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    // Force unique filenames on every build — prevents browsers serving stale cached JS
+    rollupOptions: {
+      output: {
+        entryFileNames: "assets/[name]-[hash].js",
+        chunkFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash].[ext]",
+      },
+    },
   },
 });
